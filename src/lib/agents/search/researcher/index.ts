@@ -5,6 +5,7 @@ import SessionManager from '@/lib/session';
 import { Message, ReasoningResearchBlock } from '@/lib/types';
 import formatChatHistoryAsString from '@/lib/utils/formatHistory';
 import { ToolCall } from '@/lib/models/types';
+import { summarizeContent } from '@/lib/agents/search/summarizeUtils';
 
 class Researcher {
   async research(
@@ -171,14 +172,54 @@ class Researcher {
 
       actionOutput.push(...actionResults);
 
-      actionResults.forEach((action, i) => {
+      for (let j = 0; j < actionResults.length; j++) {
+        const action = actionResults[j];
+        let content = JSON.stringify(action);
+
+        if (action.type === 'search_results') {
+          try {
+            // Check if content is massive and needs summarization for the agent history
+            // We clone the action to not affect the final output but only what the agent sees in history
+            const HISTORY_CONTEXT_LIMIT = 24000;
+            const HISTORY_CHUNK_SIZE = 24000;
+
+            const summarizedContent = await summarizeContent(
+              action.results,
+              input.followUp,
+              input.config.llm,
+              HISTORY_CONTEXT_LIMIT,
+              HISTORY_CHUNK_SIZE,
+            );
+            
+            // If summarization happened (meaning it was truncated/summarized), we create a lightweight version
+            // If summarizeContent returned the same content, it means it was small enough.
+            // But summarizeContent returns a string format, whereas action.results is Chunk[].
+            // So we should construct a "fake" action object with the string content for history.
+             
+             content = JSON.stringify({
+               type: 'search_results',
+               results: [
+                 {
+                   content: summarizedContent,
+                   metadata: { title: 'Summarized Search Results', url: 'multiple' }
+                 }
+               ]
+             });
+            
+          } catch (e) {
+            console.error("Failed to summarize tool output for history", e);
+            // Fallback: simple truncation
+            content = JSON.stringify(action).slice(0, 15000) + "... [Truncated]";
+          }
+        }
+
         agentMessageHistory.push({
           role: 'tool',
-          id: finalToolCalls[i].id,
-          name: finalToolCalls[i].name,
-          content: JSON.stringify(action),
+          id: finalToolCalls[j].id,
+          name: finalToolCalls[j].name,
+          content: content,
         });
-      });
+      }
     }
 
     const searchResults = actionOutput

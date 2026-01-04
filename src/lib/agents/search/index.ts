@@ -8,6 +8,7 @@ import db from '@/lib/db';
 import { chats, messages } from '@/lib/db/schema';
 import { and, eq, gt } from 'drizzle-orm';
 import { TextBlock } from '@/lib/types';
+import { summarizeContent } from '@/lib/agents/search/summarizeUtils';
 
 class SearchAgent {
   async searchAsync(session: SessionManager, input: SearchAgentInput) {
@@ -98,13 +99,32 @@ class SearchAgent {
       type: 'researchComplete',
     });
 
-    const finalContext =
-      searchResults?.searchFindings
+    const findings = searchResults?.searchFindings || [];
+    let finalContext = '';
+
+    try {
+      // Configuration for context management
+      // MAX_TOKENS: Threshold to trigger chunking/processing
+      // CHUNK_SIZE: Size of each chunk sent to LLM for processing
+      const CONTEXT_LIMIT = 24000;
+      const CHUNK_SIZE = 24000; 
+
+      finalContext = await summarizeContent(
+        findings,
+        input.followUp,
+        input.config.llm,
+        CONTEXT_LIMIT,
+        CHUNK_SIZE,
+      );
+    } catch (err) {
+      console.error('Error in summarization:', err);
+      finalContext = findings
         .map(
           (f, index) =>
             `<result index=${index + 1} title=${f.metadata.title}>${f.content}</result>`,
         )
-        .join('\n') || '';
+        .join('\n');
+    }
 
     const widgetContext = widgetOutputs
       .map((o) => {
