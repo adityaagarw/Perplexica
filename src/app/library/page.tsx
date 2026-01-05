@@ -2,9 +2,10 @@
 
 import DeleteChat from '@/components/DeleteChat';
 import { formatTimeDifference } from '@/lib/utils';
-import { BookOpenText, ClockIcon, FileText, Globe2Icon } from 'lucide-react';
+import { BookOpenText, ClockIcon, FileText, Globe2Icon, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 
 export interface Chat {
   id: string;
@@ -17,6 +18,8 @@ export interface Chat {
 const Page = () => {
   const [chats, setChats] = useState<Chat[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedChats, setSelectedChats] = useState<Set<string>>(new Set());
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     const fetchChats = async () => {
@@ -38,6 +41,56 @@ const Page = () => {
     fetchChats();
   }, []);
 
+  const toggleChatSelection = (chatId: string) => {
+    const newSelectedChats = new Set(selectedChats);
+    if (newSelectedChats.has(chatId)) {
+      newSelectedChats.delete(chatId);
+    } else {
+      newSelectedChats.add(chatId);
+    }
+    setSelectedChats(newSelectedChats);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedChats.size === chats.length) {
+      setSelectedChats(new Set());
+    } else {
+      setSelectedChats(new Set(chats.map((chat) => chat.id)));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedChats.size === 0) return;
+    
+    if (!confirm(`Are you sure you want to delete ${selectedChats.size} chats?`)) {
+        return;
+    }
+
+    setIsDeleting(true);
+    try {
+      const res = await fetch(`/api/chats`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ chatIds: Array.from(selectedChats) }),
+      });
+
+      if (res.status !== 200) {
+        throw new Error('Failed to delete chats');
+      }
+
+      const newChats = chats.filter((chat) => !selectedChats.has(chat.id));
+      setChats(newChats);
+      setSelectedChats(new Set());
+      toast.success('Chats deleted successfully');
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <div>
       <div className="flex flex-col pt-10 border-b border-light-200/20 dark:border-dark-200/20 pb-6 px-2">
@@ -57,13 +110,33 @@ const Page = () => {
             </div>
           </div>
 
-          <div className="flex items-center justify-center lg:justify-end gap-2 text-xs text-black/60 dark:text-white/60">
+          <div className="flex flex-col items-center justify-center lg:items-end lg:justify-end gap-2 text-xs text-black/60 dark:text-white/60">
             <span className="inline-flex items-center gap-1 rounded-full border border-black/20 dark:border-white/20 px-2 py-0.5">
               <BookOpenText size={14} />
               {loading
                 ? 'Loading…'
                 : `${chats.length} ${chats.length === 1 ? 'chat' : 'chats'}`}
             </span>
+             {chats.length > 0 && (
+                <div className="flex gap-2 mt-2">
+                    <button
+                        onClick={toggleSelectAll}
+                        className="text-xs hover:underline"
+                    >
+                        {selectedChats.size === chats.length ? 'Deselect All' : 'Select All'}
+                    </button>
+                    {selectedChats.size > 0 && (
+                        <button
+                            onClick={handleBulkDelete}
+                            disabled={isDeleting}
+                            className="inline-flex items-center gap-1 text-red-500 hover:text-red-700 transition-colors"
+                        >
+                            <Trash2 size={14} />
+                            Delete ({selectedChats.size})
+                        </button>
+                    )}
+                </div>
+            )}
           </div>
         </div>
       </div>
@@ -129,13 +202,23 @@ const Page = () => {
                   }
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <Link
-                      href={`/c/${chat.id}`}
-                      className="flex-1 text-black dark:text-white text-base lg:text-lg font-medium leading-snug line-clamp-2 group-hover:text-[#24A0ED] transition duration-200"
-                      title={chat.title}
-                    >
-                      {chat.title}
-                    </Link>
+                    <div className="flex items-start gap-3 flex-1 overflow-hidden">
+                        <input
+                            type="checkbox"
+                            checked={selectedChats.has(chat.id)}
+                            onChange={() => toggleChatSelection(chat.id)}
+                            className="mt-1.5 w-4 h-4 rounded border-gray-300 text-sky-500 focus:ring-sky-500 cursor-pointer"
+                        />
+                        <div className="flex-1 min-w-0">
+                            <Link
+                            href={`/c/${chat.id}`}
+                            className="text-black dark:text-white text-base lg:text-lg font-medium leading-snug line-clamp-2 group-hover:text-[#24A0ED] transition duration-200"
+                            title={chat.title}
+                            >
+                            {chat.title}
+                            </Link>
+                        </div>
+                    </div>
                     <div className="pt-0.5 shrink-0">
                       <DeleteChat
                         chatId={chat.id}
@@ -145,7 +228,7 @@ const Page = () => {
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2 text-black/70 dark:text-white/70">
+                  <div className="flex flex-wrap items-center gap-2 text-black/70 dark:text-white/70 ml-7">
                     <span className="inline-flex items-center gap-1 text-xs">
                       <ClockIcon size={14} />
                       {formatTimeDifference(new Date(), chat.createdAt)} Ago
